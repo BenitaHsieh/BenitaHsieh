@@ -1,0 +1,68 @@
+name: CI Pipeline
+
+on:
+  - push
+  - pull_request
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ["stable", "oldstable"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go ${{ matrix.go }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+
+      - name: Install Go dependencies
+        if: hashFiles('go.mod') != ''
+        run: go mod download
+
+      - name: Check Go formatting
+        if: hashFiles('go.mod') != ''
+        run: |
+          test -z "$(gofmt -l .)"
+
+      - name: Run Go lint
+        if: hashFiles('go.mod') != ''
+        run: |
+          if command -v golangci-lint >/dev/null 2>&1; then
+            golangci-lint run
+          else
+            go vet ./...
+          fi
+
+      - name: Build Go package
+        if: hashFiles('go.mod') != ''
+        run: go build ./...
+
+      - name: Run Go tests
+        if: hashFiles('go.mod') != ''
+        run: go test ./...
+
+      - name: Write pipeline summary
+        if: always()
+        env:
+          GO_OUTCOME: ${{ steps.go-tests.outcome }}
+        run: |
+          {
+            echo "## Go ${{ matrix.go }}"
+            echo
+            echo "| Step | Outcome |"
+            echo "| --- | --- |"
+            echo "| Go tests | $GO_OUTCOME |"
+          } >> "$GITHUB_STEP_SUMMARY"
